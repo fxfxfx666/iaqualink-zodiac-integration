@@ -34,6 +34,18 @@ def _parse_number(value: Any) -> float | int | None:
         return None
 
 
+def _parse_temp_tenths(value: Any) -> float | None:
+    """Parse a raw device value expressed in tenths of a degree into °C.
+
+    The Zodiac Z400iQ shadow reports temperatures (water, air, setpoint)
+    as integers in tenths of a degree Celsius, e.g. 294 -> 29.4°C.
+    """
+    number = _parse_number(value)
+    if number is None:
+        return None
+    return number / 10
+
+
 def parse_shadow(shadow: dict[str, Any]) -> dict[str, Any]:
     """Flatten the relevant Z400iQ fields out of the raw shadow response."""
     reported = (shadow or {}).get("state", {}).get("reported", {}) or {}
@@ -56,9 +68,9 @@ def parse_shadow(shadow: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "device_id": shadow.get("deviceId"),
-        "setpoint": _parse_number(hp.get("tsp")),
-        "water_temp": _parse_number(sns_1.get("value")),
-        "air_temp": _parse_number(sns_2.get("value")),
+        "setpoint": _parse_temp_tenths(hp.get("tsp")),
+        "water_temp": _parse_temp_tenths(sns_1.get("value")),
+        "air_temp": _parse_temp_tenths(sns_2.get("value")),
         "status": status,
         "mode": mode,
         "power_state": hp.get("state"),
@@ -135,7 +147,10 @@ class ZodiacDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self.async_request_refresh()
 
     async def async_set_setpoint(self, setpoint: int) -> None:
-        await self._async_write({"tsp": int(setpoint)}, f"set setpoint to {setpoint}°C")
+        # setpoint arrives in real °C from climate.py; device wants tenths of a degree.
+        await self._async_write(
+            {"tsp": int(round(setpoint * 10))}, f"set setpoint to {setpoint}°C"
+        )
 
     async def async_set_mode(self, mode_int: int) -> None:
         await self._async_write({"st": int(mode_int)}, f"set mode to {mode_int}")
